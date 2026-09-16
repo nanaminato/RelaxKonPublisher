@@ -1,11 +1,60 @@
 <main>
-  <header><div><p class="eyebrow">RelaxKon · 本机维护者工具</p><h1>发布工作台</h1></div><span class="local">仅监听本机回环地址</span></header>
-  <p class="notice" [class.error]="error">{{ error || message }}</p>
-  <section><h2>1. 本机绝对路径</h2><label>RelaxKonOS 源码<input [(ngModel)]="paths.relaxKonOSPath" placeholder="必须包含 RelaxKonOS.sln"></label><label>RelaxKonServer 只读来源<input [(ngModel)]="paths.relaxKonServerPath" placeholder="必须包含 Content"></label><label>独立 Content 输出目录<input [(ngModel)]="paths.contentOutputPath" placeholder="不得位于来源 Content 内"></label></section>
-  <section class="grid"><div><h2>2. 本次发布计划</h2><label>版本号<input [(ngModel)]="version" placeholder="例如 0.1.2"></label><label>运行时<select [(ngModel)]="runtime">@for (item of runtimes; track item) { <option [value]="item">{{ item }}</option> }</select></label><div class="checks"><label><input type="checkbox" [(ngModel)]="buildClient">客户端 ZIP</label><label><input type="checkbox" [(ngModel)]="buildServer">服务端 ZIP</label><label><input type="checkbox" [(ngModel)]="includeChecksums">SHA-256 文件</label><label><input type="checkbox" [(ngModel)]="includeDescriptors">发布描述</label><label><input type="checkbox" [(ngModel)]="includeInstallers">复制安装器</label><label><input type="checkbox" [(ngModel)]="onlyLatestDownloadable">仅最新版本可下载</label></div></div><aside><h2>固定构建预设</h2><p>Release · 自包含 · 所选运行时</p><p>浏览器不传递任何 Shell 命令。构建只使用后端预定义的项目和参数。</p></aside></section>
-  <div class="actions"><button type="button" (click)="previewPlan()" [disabled]="busy">预览差异</button><button class="primary" type="button" (click)="generate()" [disabled]="busy">显式生成</button></div>
-  @if (preview; as current) { <section><h2>3. 读取结果与输出差异</h2><p class="meta">Git：{{ current.gitRoot || '不可用' }} · HEAD：{{ current.head || '不可用' }} · 状态：{{ current.gitStatus || '干净' }}</p>@if (current.warnings.length) { <ul class="warnings">@for (warning of current.warnings; track warning) { <li>{{ warning }}</li> }</ul> }<table><thead><tr><th>动作</th><th>相对输出路径</th><th>原因</th></tr></thead><tbody>@for (change of current.changes; track change.relativePath + change.action) { <tr><td><span class="tag">{{ change.action }}</span></td><td>{{ change.relativePath }}</td><td>{{ change.reason }}</td></tr> }</tbody></table></section>
-  @if (histories.length) { <section><h2>历史包策略</h2><p>来源目录始终只读。勾选后才复制到独立输出；公开下载与复制可分别控制。</p><table><thead><tr><th>复制</th><th>公开下载</th><th>来源相对路径</th></tr></thead><tbody>@for (history of histories; track history.relativePath) { <tr><td><input type="checkbox" [(ngModel)]="history.copyToOutput"></td><td><input type="checkbox" [(ngModel)]="history.isDownloadable" [disabled]="!history.copyToOutput"></td><td>{{ history.relativePath }}</td></tr> }</tbody></table></section> } }
-  @if (job; as currentJob) { <section><h2>任务进度</h2><p><strong>{{ currentJob.state }}</strong> · {{ currentJob.step }}</p>@if (currentJob.affectedFiles.length) { <ul>@for (file of currentJob.affectedFiles; track file) { <li>{{ file }}</li> }</ul> }</section> }
+  <header>
+    <div><p class="eyebrow">RelaxKon · 本机维护者工具</p><h1>发布工作台</h1></div>
+    <div class="badges"><span class="local">仅监听本机回环地址</span><span class="realtime" [class.offline]="!realtimeConnected">{{ realtimeConnected ? 'SignalR 已连接' : 'SignalR 未连接' }}</span></div>
+  </header>
+  <p [class.error]="error" class="notice">{{ error || message }}</p>
+
+  <section>
+    <h2>1. 本机绝对路径</h2>
+    <label>RelaxKonOS 源码<input [(ngModel)]="paths.relaxKonOSPath" placeholder="必须包含 RelaxKonOS.sln"></label>
+    <label>RelaxKonServer 只读来源<input [(ngModel)]="paths.relaxKonServerPath" placeholder="必须包含 Content"></label>
+    <label>独立 Content 输出目录<input [(ngModel)]="paths.contentOutputPath" placeholder="不得位于来源 Content 内"></label>
+  </section>
+
+  <section class="grid">
+    <div>
+      <h2>2. 本次发布计划</h2>
+      <label>版本号<input [(ngModel)]="version" (ngModelChange)="preview = undefined" placeholder="例如 0.1.2"></label>
+      <fieldset><legend>目标平台（可多选）</legend><div class="runtime-checks">
+        <label *ngFor="let runtime of runtimes"><input type="checkbox" [checked]="isRuntimeSelected(runtime)" (change)="toggleRuntime(runtime, $any($event.target).checked)">{{ runtime }}</label>
+      </div></fieldset>
+      <div class="checks">
+        <label><input [(ngModel)]="buildClient" type="checkbox">客户端 ZIP</label>
+        <label><input [(ngModel)]="buildServer" type="checkbox">服务端 ZIP</label>
+        <label><input [(ngModel)]="includeChecksums" type="checkbox">SHA-256 文件</label>
+        <label><input [(ngModel)]="includeDescriptors" type="checkbox">发布描述</label>
+        <label><input [(ngModel)]="includeInstallers" type="checkbox">复制安装器</label>
+        <label><input [(ngModel)]="onlyLatestDownloadable" type="checkbox">仅最新版本可下载</label>
+      </div>
+    </div>
+    <aside><h2>固定构建预设</h2><p>Release · 自包含 · 所选运行时</p><p>Windows 主机可在同一任务内依次构建 Windows 与 Linux 的自包含包。浏览器不传递 Shell 命令。</p></aside>
+  </section>
+
+  <div class="actions"><button (click)="previewPlan()" [disabled]="busy || jobIsActive" type="button">构建前检查与预览</button><button *ngIf="canRetryPreview" (click)="previewPlan()" [disabled]="busy || jobIsActive" type="button">重试检查</button><button (click)="generate()" [disabled]="busy || jobIsActive" class="primary" type="button">显式生成</button><button *ngIf="jobIsActive" (click)="cancel()" class="danger" type="button">取消任务</button></div>
+
+  <section *ngIf="preview as current">
+    <h2>3. 构建前检查与输出差异</h2>
+    <p class="meta">Git：{{ current.gitRoot || '不可用' }} · HEAD：{{ current.head || '不可用' }} · 状态：{{ current.gitStatus || '干净' }}</p>
+    <ul class="preflight"><li *ngFor="let check of current.preflightChecks" [class.failed]="!check.passed"><span>{{ check.passed ? '✓' : '×' }}</span><strong>{{ check.name }}</strong>：{{ check.detail }}</li></ul>
+    <ul class="warnings" *ngIf="current.warnings.length"><li *ngFor="let warning of current.warnings">{{ warning }}</li></ul>
+    <table><thead><tr><th>动作</th><th>相对输出路径</th><th>原因</th></tr></thead><tbody><tr *ngFor="let change of current.changes"><td><span class="tag">{{ change.action }}</span></td><td>{{ change.relativePath }}</td><td>{{ change.reason }}</td></tr></tbody></table>
+  </section>
+
+  <section *ngIf="histories.length"><h2>历史包策略</h2><p>来源目录始终只读。勾选后才复制到独立输出；公开下载与复制可分别控制。</p><table><thead><tr><th>复制</th><th>公开下载</th><th>来源相对路径</th></tr></thead><tbody><tr *ngFor="let history of histories"><td><input [(ngModel)]="history.copyToOutput" type="checkbox"></td><td><input [(ngModel)]="history.isDownloadable" [disabled]="!history.copyToOutput" type="checkbox"></td><td>{{ history.relativePath }}</td></tr></tbody></table></section>
+
+  <section *ngIf="job as currentJob">
+    <h2>任务进度</h2><p><strong>{{ currentJob.state }}</strong> · {{ currentJob.step }}</p>
+    <div class="progress" *ngIf="currentJob.progressTotal"><div [style.width.%]="progressPercent"></div></div><p class="meta" *ngIf="currentJob.progressTotal">{{ currentJob.progressCurrent }} / {{ currentJob.progressTotal }}（{{ progressPercent }}%）</p>
+    <ul *ngIf="currentJob.affectedFiles.length"><li *ngFor="let file of currentJob.affectedFiles">{{ file }}</li></ul>
+  </section>
+
+  <section class="live-log-section">
+    <h2>实时执行日志</h2><p class="meta">{{ previewInProgress ? '正在接收预览检查日志' : '通过 SignalR 实时推送' }}，最多保留最近 1,000 条。</p>
+    <p *ngIf="!liveLogs.length" class="log-empty">等待开始构建前检查或生成任务…</p>
+    <ol *ngIf="liveLogs.length" class="job-log" aria-live="polite"><li *ngFor="let entry of liveLogs" [class.log-error]="entry.level === 'error'" [class.log-warning]="entry.level === 'warning'" [class.log-success]="entry.level === 'success'"><time>{{ entry.timestamp | date:'HH:mm:ss' }}</time><span>{{ entry.message }}</span></li></ol>
+  </section>
+
+  <section *ngIf="job?.state === 'succeeded'"><h2>4. Downloads/downloads.json 变更</h2><p *ngIf="!job?.downloadChanges?.length" class="meta">下载清单内容没有变化。</p><table *ngIf="job?.downloadChanges?.length"><thead><tr><th>动作</th><th>文件</th><th>说明</th></tr></thead><tbody><tr *ngFor="let change of job?.downloadChanges"><td><span class="tag">{{ change.action }}</span></td><td>{{ change.fileName }}</td><td>{{ change.detail }}</td></tr></tbody></table></section>
   <footer>不读取、不显示也不写入 Docs、Faq 或 Releases；完成后请自行检查独立输出，再手动替换官网 Content。</footer>
 </main>
