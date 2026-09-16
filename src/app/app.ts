@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, NgZone, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
 
@@ -25,7 +25,7 @@ export class App implements OnInit, OnDestroy {
   version = ''; selectedRuntimes = ['win-x64']; buildClient = true; buildServer = true; includeChecksums = true; includeDescriptors = true; includeInstallers = false; onlyLatestDownloadable = false;
   histories: HistoryDecision[] = []; preview?: PublisherPreview; job?: PublisherJob; busy = false; message = '正在读取本机发布者设置…'; error = ''; canRetryPreview = false; realtimeConnected = false; liveLogs: JobLogEntry[] = []; previewInProgress = false;
 
-  constructor(private readonly zone: NgZone) { }
+  constructor(private readonly zone: NgZone, private readonly changeDetector: ChangeDetectorRef) { }
 
   get progressPercent(): number { return this.job?.progressTotal ? Math.round(this.job.progressCurrent / this.job.progressTotal * 100) : 0; }
   get jobIsActive(): boolean { return this.job !== undefined && ['queued', 'running'].includes(this.job.state); }
@@ -38,6 +38,7 @@ export class App implements OnInit, OnDestroy {
       this.paths = saved ? { ...defaults, ...JSON.parse(saved) as PublisherPaths } : defaults;
       this.message = '请选择一个或多个目标平台，然后预览输出差异和构建前检查。';
     } catch (error) { this.error = this.errorText(error); }
+    finally { this.requestViewRefresh(); }
   }
 
   ngOnDestroy(): void { if (this.previewTimeout) window.clearTimeout(this.previewTimeout); void this.hub?.stop(); }
@@ -113,16 +114,19 @@ export class App implements OnInit, OnDestroy {
         .withAutomaticReconnect()
         .configureLogging(LogLevel.Warning)
         .build();
-      this.hub.on('jobUpdated', (job: PublisherJob) => this.zone.run(() => this.applyJobUpdate(job)));
-      this.hub.on('previewLog', (entry: JobLogEntry) => this.zone.run(() => this.appendLiveLog(entry.level, entry.message, entry.timestamp)));
-      this.hub.on('previewCompleted', (preview: PublisherPreview) => this.zone.run(() => this.finishPreview(preview)));
-      this.hub.on('previewFailed', (message: string) => this.zone.run(() => this.finishPreviewFailure(message)));
-      this.hub.onclose(() => this.zone.run(() => {
+      // SignalR invokes handlers outside Angular's render scheduler.  NgZone.run alone is
+      // a no-op for rendering when this application runs zoneless, so every external
+      // notification must explicitly mark the view dirty.
+      this.hub.on('jobUpdated', (job: PublisherJob) => this.applyRealtimeUpdate(() => this.applyJobUpdate(job)));
+      this.hub.on('previewLog', (entry: JobLogEntry) => this.applyRealtimeUpdate(() => this.appendLiveLog(entry.level, entry.message, entry.timestamp)));
+      this.hub.on('previewCompleted', (preview: PublisherPreview) => this.applyRealtimeUpdate(() => this.finishPreview(preview)));
+      this.hub.on('previewFailed', (message: string) => this.applyRealtimeUpdate(() => this.finishPreviewFailure(message)));
+      this.hub.onclose(() => this.applyRealtimeUpdate(() => {
         this.realtimeConnected = false;
         if (this.jobIsActive) this.error = '与本机发布服务的实时连接已断开；任务状态无法继续自动更新。';
       }));
       this.hub.onreconnected(async () => {
-        this.zone.run(() => { this.realtimeConnected = true; this.error = ''; });
+        this.applyRealtimeUpdate(() => { this.realtimeConnected = true; this.error = ''; });
         const activeJob = this.job;
         if (activeJob && ['queued', 'running'].includes(activeJob.state)) await this.hub?.invoke('Subscribe', activeJob.id);
       });
@@ -144,6 +148,15 @@ export class App implements OnInit, OnDestroy {
   private appendLiveLog(level: string, message: string, timestamp = new Date().toISOString()): void {
     this.liveLogs = [...this.liveLogs, { timestamp, level, message }].slice(-1_000);
   }
+
+  private applyRealtimeUpdate(update: () => void): void {
+    this.zone.run(() => {
+      update();
+      this.requestViewRefresh();
+    });
+  }
+
+  private requestViewRefresh(): void { this.changeDetector.markForCheck(); }
 
   private finishPreview(preview: PublisherPreview): void {
     if (this.previewTimeout) window.clearTimeout(this.previewTimeout);
