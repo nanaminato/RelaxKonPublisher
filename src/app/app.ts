@@ -19,6 +19,7 @@ export class App implements OnInit, OnDestroy {
   private readonly api = 'http://127.0.0.1:5112/api/publisher';
   private readonly hubUrl = 'http://127.0.0.1:5112/hubs/publisher';
   private hub?: HubConnection;
+  private previewTimeout?: number;
   readonly runtimes = ['win-x64', 'win-arm64', 'linux-x64', 'linux-arm64'];
   paths: PublisherPaths = { relaxKonOSPath: '', relaxKonServerPath: '', contentOutputPath: '' };
   version = ''; selectedRuntimes = ['win-x64']; buildClient = true; buildServer = true; includeChecksums = true; includeDescriptors = true; includeInstallers = false; onlyLatestDownloadable = false;
@@ -39,7 +40,7 @@ export class App implements OnInit, OnDestroy {
     } catch (error) { this.error = this.errorText(error); }
   }
 
-  ngOnDestroy(): void { void this.hub?.stop(); }
+  ngOnDestroy(): void { if (this.previewTimeout) window.clearTimeout(this.previewTimeout); void this.hub?.stop(); }
 
   isRuntimeSelected(runtime: string): boolean { return this.selectedRuntimes.includes(runtime); }
 
@@ -54,16 +55,15 @@ export class App implements OnInit, OnDestroy {
     try {
       this.savePaths();
       await this.connectRealtime();
-      this.preview = await this.hub!.invoke<PublisherPreview>('Preview', this.plan());
-      this.histories = this.preview.existingPackages.filter(item => item.relativePath.endsWith('.zip')).map(item => ({ relativePath: item.relativePath, copyToOutput: false, isDownloadable: item.isDownloadable }));
-      this.message = '检查通过；预览不会修改任何目录。';
+      this.previewTimeout = window.setTimeout(() => this.finishPreviewFailure('预览在 15 秒内未收到完成事件。请检查 SignalR 连接和后端日志。'), 15_000);
+      await this.hub!.send('StartPreview', this.plan());
       return true;
-    } catch (error) { this.error = this.errorText(error); this.appendLiveLog('error', this.error); this.canRetryPreview = true; return false; } finally { this.busy = false; this.previewInProgress = false; }
+    } catch (error) { this.finishPreviewFailure(this.errorText(error)); return false; }
   }
 
   async generate(): Promise<void> {
     if (!this.validatePlan()) return;
-    if (!this.preview && !await this.previewPlan()) return;
+    if (!this.preview) { await this.previewPlan(); return; }
     const replacements = this.preview?.changes.filter(change => change.action === '替换') ?? [];
     if (replacements.length && !window.confirm(`将以可恢复方式替换 ${replacements.length} 个独立输出文件。继续生成？`)) return;
     this.busy = true; this.error = '';
@@ -115,6 +115,8 @@ export class App implements OnInit, OnDestroy {
         .build();
       this.hub.on('jobUpdated', (job: PublisherJob) => this.zone.run(() => this.applyJobUpdate(job)));
       this.hub.on('previewLog', (entry: JobLogEntry) => this.zone.run(() => this.appendLiveLog(entry.level, entry.message, entry.timestamp)));
+      this.hub.on('previewCompleted', (preview: PublisherPreview) => this.zone.run(() => this.finishPreview(preview)));
+      this.hub.on('previewFailed', (message: string) => this.zone.run(() => this.finishPreviewFailure(message)));
       this.hub.onclose(() => this.zone.run(() => {
         this.realtimeConnected = false;
         if (this.jobIsActive) this.error = '与本机发布服务的实时连接已断开；任务状态无法继续自动更新。';
@@ -141,6 +143,26 @@ export class App implements OnInit, OnDestroy {
 
   private appendLiveLog(level: string, message: string, timestamp = new Date().toISOString()): void {
     this.liveLogs = [...this.liveLogs, { timestamp, level, message }].slice(-1_000);
+  }
+
+  private finishPreview(preview: PublisherPreview): void {
+    if (this.previewTimeout) window.clearTimeout(this.previewTimeout);
+    this.previewTimeout = undefined;
+    this.preview = preview;
+    this.histories = preview.existingPackages.filter(item => item.relativePath.endsWith('.zip')).map(item => ({ relativePath: item.relativePath, copyToOutput: false, isDownloadable: item.isDownloadable }));
+    this.message = '检查通过；预览不会修改任何目录。';
+    this.busy = false;
+    this.previewInProgress = false;
+  }
+
+  private finishPreviewFailure(message: string): void {
+    if (this.previewTimeout) window.clearTimeout(this.previewTimeout);
+    this.previewTimeout = undefined;
+    this.error = message;
+    this.appendLiveLog('error', message);
+    this.canRetryPreview = true;
+    this.busy = false;
+    this.previewInProgress = false;
   }
 
   private async request<T>(path: string, body?: unknown): Promise<T> {
