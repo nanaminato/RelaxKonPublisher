@@ -1,4 +1,6 @@
-# RelaxKonPublisher
+# RelaxKon Publisher
+
+内部本机发布工作台。先启动 `RelaxKonPublisherServer`，再运行 `npm start`；界面仅通过其类型化 API 访问 `http://127.0.0.1:5112`。三个绝对路径仅保存在浏览器 `localStorage`，浏览器存储为空时使用后端的本机配置。
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.1.8.
 
