@@ -2,6 +2,8 @@
 
 内部本机发布工作台。先启动 `RelaxKonPublisherServer`，再运行 `npm start`；界面仅通过其类型化 API 访问 `http://127.0.0.1:5112`。三个绝对路径仅保存在浏览器 `localStorage`，浏览器存储为空时使用后端的本机配置。
 
+客户端可选择 `win-x64`、`win-arm64`、`linux-x64`、`linux-arm64` 与 `osx-arm64`（Apple Silicon）。不再提供 Intel macOS（`osx-x64`）构建。服务端目标仍仅支持 Windows 与 Linux。macOS 输出为便携 ZIP，包内包含启动与签名说明；对外发布前须在 Apple 发布流程中完成签名和公证。
+
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.1.8.
 
 ## Development server

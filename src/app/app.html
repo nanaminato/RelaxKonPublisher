@@ -16,8 +16,11 @@
     <div>
       <h2>2. 本次发布计划</h2>
       <label>版本号<input [(ngModel)]="version" (ngModelChange)="preview = undefined" placeholder="例如 0.1.2"></label>
-      <fieldset><legend>目标平台（可多选）</legend><div class="runtime-checks">
-        <label *ngFor="let runtime of runtimes"><input type="checkbox" [checked]="isRuntimeSelected(runtime)" (change)="toggleRuntime(runtime, $any($event.target).checked)">{{ runtime }}</label>
+      <fieldset><legend>客户端目标平台（可多选）</legend><div class="runtime-checks">
+        <label *ngFor="let runtime of clientRuntimes"><input type="checkbox" [checked]="isClientRuntimeSelected(runtime)" (change)="toggleClientRuntime(runtime, $any($event.target).checked)">{{ runtime }}</label>
+      </div><p class="platform-note">macOS 客户端仅提供 Apple Silicon（osx-arm64）便携 ZIP。</p></fieldset>
+      <fieldset><legend>服务端目标平台（可多选）</legend><div class="runtime-checks">
+        <label *ngFor="let runtime of serverRuntimes"><input type="checkbox" [checked]="isServerRuntimeSelected(runtime)" (change)="toggleServerRuntime(runtime, $any($event.target).checked)">{{ runtime }}</label>
       </div></fieldset>
       <div class="checks">
         <label><input [(ngModel)]="buildClient" type="checkbox">客户端 ZIP</label>
@@ -28,7 +31,7 @@
         <label><input [(ngModel)]="onlyLatestDownloadable" type="checkbox">仅最新版本可下载</label>
       </div>
     </div>
-    <aside><h2>固定构建预设</h2><p>Release · 自包含 · 所选运行时</p><p>Windows 主机可在同一任务内依次构建 Windows 与 Linux 的自包含包。浏览器不传递 Shell 命令。</p></aside>
+    <aside><h2>固定构建预设</h2><p>Release · 自包含 · 所选运行时</p><p>macOS 仅生成客户端 ZIP；服务端仍限 Windows 与 Linux。macOS 的签名与公证需在 Apple 发布流程中完成。浏览器不传递 Shell 命令。</p></aside>
   </section>
 
   <div class="actions"><button (click)="previewPlan()" [disabled]="busy || jobIsActive" type="button">构建前检查与预览</button><button *ngIf="canRetryPreview" (click)="previewPlan()" [disabled]="busy || jobIsActive" type="button">重试检查</button><button (click)="generate()" [disabled]="busy || jobIsActive" class="primary" type="button">显式生成</button><button *ngIf="jobIsActive" (click)="cancel()" class="danger" type="button">取消任务</button></div>

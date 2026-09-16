@@ -131,6 +131,12 @@ legend {
     margin-right: 7px
 }
 
+.platform-note {
+    margin: .55rem 0 0;
+    color: var(--muted-text, #65727f);
+    font-size: .88rem;
+}
+
 input:not([type=checkbox]),
 select {
     display: block;

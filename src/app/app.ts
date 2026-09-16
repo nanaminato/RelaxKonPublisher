@@ -12,7 +12,7 @@ interface DownloadChange { action: string; fileName: string; detail: string; }
 interface JobLogEntry { timestamp: string; level: string; message: string; }
 interface PublisherPreview { paths: PublisherPaths; gitRoot?: string; head?: string; gitStatus?: string; presets: string[]; existingPackages: ExistingPackage[]; changes: OutputChange[]; warnings: string[]; preflightChecks: PreflightCheck[]; }
 interface PublisherJob { id: string; state: string; step: string; error?: string; affectedFiles: string[]; progressCurrent: number; progressTotal: number; cancellationRequested: boolean; downloadChanges: DownloadChange[]; logs: JobLogEntry[]; }
-interface PublisherPlan { paths: PublisherPaths; version: string; runtimes: string[]; buildClient: boolean; buildServer: boolean; includeChecksums: boolean; includeDescriptors: boolean; includeInstallers: boolean; onlyLatestDownloadable: boolean; historicalPackages: HistoryDecision[]; }
+interface PublisherPlan { paths: PublisherPaths; version: string; runtimes: string[]; clientRuntimes: string[]; serverRuntimes: string[]; buildClient: boolean; buildServer: boolean; includeChecksums: boolean; includeDescriptors: boolean; includeInstallers: boolean; onlyLatestDownloadable: boolean; historicalPackages: HistoryDecision[]; }
 
 @Component({ imports: [CommonModule, FormsModule], selector: 'app-root', styleUrl: './app.css', templateUrl: './app.html' })
 export class App implements OnInit, OnDestroy {
@@ -20,9 +20,10 @@ export class App implements OnInit, OnDestroy {
   private readonly hubUrl = 'http://127.0.0.1:5112/hubs/publisher';
   private hub?: HubConnection;
   private previewTimeout?: number;
-  readonly runtimes = ['win-x64', 'win-arm64', 'linux-x64', 'linux-arm64'];
+  readonly clientRuntimes = ['win-x64', 'win-arm64', 'linux-x64', 'linux-arm64', 'osx-arm64'];
+  readonly serverRuntimes = ['win-x64', 'win-arm64', 'linux-x64', 'linux-arm64'];
   paths: PublisherPaths = { relaxKonOSPath: '', relaxKonServerPath: '', contentOutputPath: '' };
-  version = ''; selectedRuntimes = ['win-x64']; buildClient = true; buildServer = true; includeChecksums = true; includeDescriptors = true; includeInstallers = false; onlyLatestDownloadable = false;
+  version = ''; selectedClientRuntimes = ['win-x64']; selectedServerRuntimes = ['win-x64']; buildClient = true; buildServer = true; includeChecksums = true; includeDescriptors = true; includeInstallers = false; onlyLatestDownloadable = false;
   histories: HistoryDecision[] = []; preview?: PublisherPreview; job?: PublisherJob; busy = false; message = '正在读取本机发布者设置…'; error = ''; canRetryPreview = false; realtimeConnected = false; liveLogs: JobLogEntry[] = []; previewInProgress = false;
 
   constructor(private readonly zone: NgZone, private readonly changeDetector: ChangeDetectorRef) { }
@@ -43,10 +44,16 @@ export class App implements OnInit, OnDestroy {
 
   ngOnDestroy(): void { if (this.previewTimeout) window.clearTimeout(this.previewTimeout); void this.hub?.stop(); }
 
-  isRuntimeSelected(runtime: string): boolean { return this.selectedRuntimes.includes(runtime); }
+  isClientRuntimeSelected(runtime: string): boolean { return this.selectedClientRuntimes.includes(runtime); }
+  isServerRuntimeSelected(runtime: string): boolean { return this.selectedServerRuntimes.includes(runtime); }
 
-  toggleRuntime(runtime: string, checked: boolean): void {
-    this.selectedRuntimes = checked ? [...this.selectedRuntimes, runtime] : this.selectedRuntimes.filter(item => item !== runtime);
+  toggleClientRuntime(runtime: string, checked: boolean): void {
+    this.selectedClientRuntimes = checked ? [...this.selectedClientRuntimes, runtime] : this.selectedClientRuntimes.filter(item => item !== runtime);
+    this.preview = undefined;
+  }
+
+  toggleServerRuntime(runtime: string, checked: boolean): void {
+    this.selectedServerRuntimes = checked ? [...this.selectedServerRuntimes, runtime] : this.selectedServerRuntimes.filter(item => item !== runtime);
     this.preview = undefined;
   }
 
@@ -87,7 +94,8 @@ export class App implements OnInit, OnDestroy {
   }
 
   private plan(): PublisherPlan {
-    return { paths: this.paths, version: this.version.trim(), runtimes: this.selectedRuntimes, buildClient: this.buildClient, buildServer: this.buildServer, includeChecksums: this.includeChecksums, includeDescriptors: this.includeDescriptors, includeInstallers: this.includeInstallers, onlyLatestDownloadable: this.onlyLatestDownloadable, historicalPackages: this.histories };
+    const runtimes = [...new Set([...this.selectedClientRuntimes, ...this.selectedServerRuntimes])];
+    return { paths: this.paths, version: this.version.trim(), runtimes, clientRuntimes: this.selectedClientRuntimes, serverRuntimes: this.selectedServerRuntimes, buildClient: this.buildClient, buildServer: this.buildServer, includeChecksums: this.includeChecksums, includeDescriptors: this.includeDescriptors, includeInstallers: this.includeInstallers, onlyLatestDownloadable: this.onlyLatestDownloadable, historicalPackages: this.histories };
   }
 
   private validatePlan(): boolean {
@@ -97,7 +105,8 @@ export class App implements OnInit, OnDestroy {
       this.error = '版本号只能包含字母、数字、点、下划线和连字符。';
       return false;
     }
-    if (!this.selectedRuntimes.length) { this.error = '至少选择一个目标平台。'; return false; }
+    if (this.buildClient && !this.selectedClientRuntimes.length) { this.error = '至少选择一个客户端目标平台。'; return false; }
+    if (this.buildServer && !this.selectedServerRuntimes.length) { this.error = '至少选择一个服务端目标平台。'; return false; }
     if (!this.buildClient && !this.buildServer && !this.includeInstallers) {
       this.error = '至少选择客户端 ZIP、服务端 ZIP 或复制安装器中的一项。';
       return false;
